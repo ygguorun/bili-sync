@@ -1,0 +1,60 @@
+name: Tag Custom Build On PR Merge
+
+on:
+  pull_request:
+    branches:
+      - custom-main
+    types:
+      - closed
+
+permissions:
+  contents: write
+
+jobs:
+  create-custom-tag:
+    if: ${{ github.event.pull_request.merged == true }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve upstream tag from PR metadata
+        id: resolve
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          upstream_tag=""
+          if [[ "$PR_TITLE" =~ ^(v[0-9]+\.[0-9]+\.[0-9]+.*)-custom-build$ ]]; then
+            upstream_tag="${BASH_REMATCH[1]}"
+          elif [[ "$PR_BODY" =~ upstream_tag:[[:space:]]*(v[0-9]+\.[0-9]+\.[0-9]+[^[:space:]]*) ]]; then
+            upstream_tag="${BASH_REMATCH[1]}"
+          else
+            echo "Cannot resolve upstream tag from PR title/body"
+            exit 1
+          fi
+
+          custom_tag="${upstream_tag}-custom-build"
+          echo "upstream_tag=$upstream_tag" >> "$GITHUB_OUTPUT"
+          echo "custom_tag=$custom_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push custom tag
+        env:
+          CUSTOM_TAG: ${{ steps.resolve.outputs.custom_tag }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git ls-remote --tags origin "refs/tags/$CUSTOM_TAG" | grep -q "$CUSTOM_TAG"; then
+            echo "Tag already exists: $CUSTOM_TAG"
+            exit 0
+          fi
+
+          git tag "$CUSTOM_TAG" "$MERGE_SHA"
+          git push origin "refs/tags/$CUSTOM_TAG"

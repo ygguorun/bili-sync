@@ -1,0 +1,79 @@
+name: Sync Upstream Release
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream tags
+        shell: bash
+        run: |
+          git remote add upstream https://github.com/amtoaer/bili-sync.git || true
+          git fetch upstream --tags --force
+
+      - name: Sync upstream tag to main
+        id: sync
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          latest_tag="$(gh api repos/amtoaer/bili-sync/releases/latest --jq '.tag_name')"
+          if [ -z "$latest_tag" ]; then
+            echo "latest_tag not found"
+            exit 1
+          fi
+
+          upstream_sha="$(git ls-remote upstream "refs/tags/$latest_tag^{}" | awk '{print $1}')"
+          if [ -z "$upstream_sha" ]; then
+            upstream_sha="$(git ls-remote upstream "refs/tags/$latest_tag" | awk '{print $1}')"
+          fi
+          if [ -z "$upstream_sha" ]; then
+            echo "Unable to resolve commit for upstream tag: $latest_tag"
+            exit 1
+          fi
+
+          remote_main_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          if [ "$remote_main_sha" = "$upstream_sha" ]; then
+            echo "No new upstream release to sync"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git update-ref refs/heads/main "$upstream_sha"
+          git push origin refs/heads/main:refs/heads/main --force-with-lease=refs/heads/main:$remote_main_sha
+
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update sync PR
+        if: steps.sync.outputs.updated == 'true'
+        env:
+          LATEST_TAG: ${{ steps.sync.outputs.latest_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="${LATEST_TAG}-custom-build"
+          body="## Sync upstream release\n\n- upstream_tag: ${LATEST_TAG}\n- source_branch: main\n- target_branch: custom-main\n\nPlease review and merge this PR. After merge, automation will create ${LATEST_TAG}-custom-build tag on custom-main."
+
+          existing_number="$(gh pr list --base custom-main --head main --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$existing_number" ]; then
+            gh pr edit "$existing_number" --title "$title" --body "$body"
+          else
+            gh pr create --base custom-main --head main --title "$title" --body "$body"
+          fi

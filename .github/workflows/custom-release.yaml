@@ -1,0 +1,54 @@
+name: Custom Release
+
+on:
+  push:
+    tags:
+      - "v*-custom-build"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build frontend
+        working-directory: web
+        shell: bash
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Install cross
+        shell: bash
+        run: cargo install cross --locked
+
+      - name: Build armv7 gnu binary
+        shell: bash
+        run: cross build --target armv7-unknown-linux-gnueabihf --release --locked
+
+      - name: Package binary
+        shell: bash
+        run: |
+          tar czvf bili-sync-rs-Linux-armv7-gnueabihf.tar.gz -C target/armv7-unknown-linux-gnueabihf/release bili-sync-rs
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: bili-sync-rs-Linux-armv7-gnueabihf.tar.gz
+          draft: false
+          generate_release_notes: true
