@@ -13,7 +13,7 @@ jobs:
   sync:
     runs-on: ubuntu-24.04
     env:
-      GH_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ secrets.MY_PAT }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -69,9 +69,21 @@ jobs:
         run: |
           set -euo pipefail
           title="${LATEST_TAG}-custom-build"
-          body="## Sync upstream release\n\n- upstream_tag: ${LATEST_TAG}\n- source_branch: main\n- target_branch: custom-main\n\nPlease review and merge this PR. After merge, automation will create ${LATEST_TAG}-custom-build tag on custom-main."
+          body="## Sync upstream release
 
-          existing_number="$(gh pr list --base custom-main --head main --state open --json number --jq '.[0].number // empty')"
+          - upstream_tag: ${LATEST_TAG}
+          - source_branch: main
+          - target_branch: custom-main
+
+          Please review and merge this PR. After merge, automation will create ${LATEST_TAG}-custom-build tag on custom-main."
+
+          existing_number="$(gh pr list \
+            --base custom-main \
+            --head main \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')"
+
           if [ -n "$existing_number" ]; then
             gh pr edit "$existing_number" --title "$title" --body "$body"
           else
