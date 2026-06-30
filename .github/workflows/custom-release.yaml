@@ -1,9 +1,15 @@
 name: Custom Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      custom_tag:
+        description: Custom build tag to release
+        required: true
+        type: string
   push:
     tags:
-      - "v*"
+      - "v*-custom-build"
 
 permissions:
   contents: write
@@ -11,11 +17,14 @@ permissions:
 jobs:
   build-and-release:
     runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ inputs.custom_tag || github.ref_name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup bun
         uses: oven-sh/setup-bun@v2
@@ -46,9 +55,9 @@ jobs:
           tar czvf bili-sync-rs-Linux-armv7-gnueabihf.tar.gz -C target/armv7-unknown-linux-gnueabihf/release bili-sync-rs
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
           files: bili-sync-rs-Linux-armv7-gnueabihf.tar.gz
           draft: false
           generate_release_notes: true

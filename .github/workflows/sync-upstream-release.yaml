@@ -6,14 +6,17 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
-  pull-requests: write
 
 jobs:
   sync:
     runs-on: ubuntu-24.04
     env:
-      GH_TOKEN: ${{ secrets.MY_PAT }}
+      GH_TOKEN: ${{ github.token }}
+      TARGET_REPO: ${{ github.repository }}
+      UPSTREAM_REPO: amtoaer/bili-sync
+      TARGET_BRANCH: custom-main
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -26,16 +29,26 @@ jobs:
           git remote add upstream https://github.com/amtoaer/bili-sync.git || true
           git fetch upstream --tags --force
 
-      - name: Sync upstream tag to main
+      - name: Prepare custom build tag from upstream release
         id: sync
         shell: bash
         run: |
           set -euo pipefail
 
-          latest_tag="$(gh api repos/amtoaer/bili-sync/releases/latest --jq '.tag_name')"
+          latest_tag="$(gh api repos/$UPSTREAM_REPO/releases/latest --jq '.tag_name')"
           if [ -z "$latest_tag" ]; then
             echo "latest_tag not found"
             exit 1
+          fi
+
+          custom_tag="${latest_tag}-custom-build"
+
+          if gh release view "$custom_tag" >/dev/null 2>&1; then
+            echo "Custom release already exists: $custom_tag"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
+            echo "custom_tag=$custom_tag" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           upstream_sha="$(git ls-remote upstream "refs/tags/$latest_tag^{}" | awk '{print $1}')"
@@ -47,45 +60,23 @@ jobs:
             exit 1
           fi
 
-          remote_main_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
-          if [ "$remote_main_sha" = "$upstream_sha" ]; then
-            echo "No new upstream release to sync"
-            echo "updated=false" >> "$GITHUB_OUTPUT"
-            echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
-            exit 0
+          if git ls-remote --tags origin "refs/tags/$custom_tag" | grep -q "$custom_tag"; then
+            echo "Custom tag already exists: $custom_tag"
+          else
+            git tag "$custom_tag" "$upstream_sha"
+            git push origin "refs/tags/$custom_tag"
           fi
-
-          git update-ref refs/heads/main "$upstream_sha"
-          git push origin refs/heads/main:refs/heads/main --force-with-lease=refs/heads/main:$remote_main_sha
 
           echo "updated=true" >> "$GITHUB_OUTPUT"
           echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
+          echo "custom_tag=$custom_tag" >> "$GITHUB_OUTPUT"
 
-      - name: Create or update sync PR
+      - name: Trigger custom release
         if: steps.sync.outputs.updated == 'true'
         env:
-          LATEST_TAG: ${{ steps.sync.outputs.latest_tag }}
+          CUSTOM_TAG: ${{ steps.sync.outputs.custom_tag }}
         shell: bash
         run: |
           set -euo pipefail
-          title="${LATEST_TAG}-custom-build"
-          body="## Sync upstream release
 
-          - upstream_tag: ${LATEST_TAG}
-          - source_branch: main
-          - target_branch: custom-main
-
-          Please review and merge this PR. After merge, automation will create ${LATEST_TAG}-custom-build tag on custom-main."
-
-          existing_number="$(gh pr list \
-            --base custom-main \
-            --head main \
-            --state open \
-            --json number \
-            --jq '.[0].number // empty')"
-
-          if [ -n "$existing_number" ]; then
-            gh pr edit "$existing_number" --title "$title" --body "$body"
-          else
-            gh pr create --base custom-main --head main --title "$title" --body "$body"
-          fi
+          gh workflow run custom-release.yaml -R "$TARGET_REPO" --ref "$TARGET_BRANCH" -f custom_tag="$CUSTOM_TAG"
