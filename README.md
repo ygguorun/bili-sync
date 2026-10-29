@@ -1,48 +1,69 @@
-![bili-sync](https://socialify.git.ci/amtoaer/bili-sync/image?description=1&font=KoHo&issues=1&language=1&logo=https%3A%2F%2Fs2.loli.net%2F2023%2F12%2F02%2F9EwT2yInOu1d3zm.png&name=1&owner=1&pattern=Signal&pulls=1&stargazers=1&theme=Light)
+# bili-sync 自定义构建
 
-## 简介
+本仓库只维护 **自动构建脚本**，不保存应用源码。每天检查一次上游 [amtoaer/bili-sync](https://github.com/amtoaer/bili-sync)，为指定提交编译 ARMv7 GNU 版本并发布。
 
-> [!NOTE]
-> [查看文档](https://bili-sync.amto.cc/) ｜ [加入 Telegram 交流群](https://t.me/+nuYrt8q6uEo4MWI1)
+- 上游仓库：<https://github.com/amtoaer/bili-sync>
+- 使用文档：<https://bili-sync.amto.cc/>
+- 上游许可证：[MIT](./License)
 
-bili-sync 是一款专为 NAS 用户编写的哔哩哔哩同步工具，由 Rust & Tokio 驱动。
+## 目录结构
 
-## 效果演示
+```text
+.github/workflows/upstream-build.yaml  # 检测 → 编译 → 发布
+scripts/check-upstream.sh              # 判断是否需要构建，生成版本标签
+scripts/build-armv7.sh                 # 取回固定提交、应用配置、编译打包
+scripts/publish-release.sh             # 推送标签、上传附件、发布 Release
+Cross.toml                             # 自定义交叉编译配置
+```
 
-### 管理页
-![管理页](./assets/webui.webp)
-### 媒体库概览
-![媒体库概览](./assets/overview.webp)
-### 媒体库详情
-![媒体库详情](./assets/detail.webp)
-### 播放（使用 infuse）
-![播放](./assets/play.webp)
-### 文件排布
-![文件](./assets/dir.webp)
+## 构建流程
 
+```text
+每天检查上游
+  → 上游正式版 / main 最新提交
+  → 逐版本编译：上游源码（固定 SHA）+ 本仓库 Cross.toml
+  → 推送标签 → 创建草稿 → 上传附件 → 发布
+```
 
-## 功能与路线图
+- **源码**取自上游固定提交，编译结果只由该 SHA 决定。
+- **构建配置**取自本仓库当前提交（`GITHUB_SHA`），发布说明中会记录。
+- 只有 **Release 已发布且附件完整** 才跳过；草稿或缺附件会重新处理，可直接重跑失败的 workflow。
 
-- [x] 使用用户填写的凭据认证，并在必要时自动刷新
-- [x] 支持收藏夹与视频列表/视频合集的下载
-- [x] 自动选择用户设置范围内最优的视频和音频流，并在下载完成后使用 FFmpeg 合并
-- [x] 使用 Tokio 与 Reqwest，对视频、视频分页进行异步并发下载
-- [x] 使用媒体服务器支持的文件命名，方便一键作为媒体库导入
-- [x] 当前轮次下载失败会在下一轮下载时重试，失败次数过多自动丢弃
-- [x] 使用数据库保存媒体信息，避免对同个视频的多次请求
-- [x] 打印日志，并在请求出现风控时自动终止，等待下一轮执行
-- [x] 提供多平台的二进制可执行文件，为 Linux 平台提供了立即可用的 Docker 镜像
-- [x] 支持对“稍后再看”内视频的自动扫描与下载
-- [x] 支持对 UP 主投稿视频的自动扫描与下载
-- [x] 支持限制任务的并行度和接口请求频率
-- [x] 支持单个文件的分块并行下载
-- [x] 支持使用 Web UI 配置，查看并管理视频、视频源
+调度为每天北京时间 16:00（`0 8 * * *`），定时任务可能有延迟；也可在 Actions 页面手动触发。
 
+## 版本规则
 
-## 参考与借鉴
+| 来源 | 标签示例 | Release |
+| --- | --- | --- |
+| 上游正式发版 | `v2.11.1-gabcdef123456-custom-build` | 正式版，可设为 Latest |
+| 普通提交 | `v2.11.1-dev-gfedcba654321-custom-build` | Pre-release，不影响 Latest |
 
-该项目实现过程中主要参考借鉴了如下的项目，感谢他们的贡献：
+- 标签中的 12 位 SHA 是被编译的上游提交。
+- 普通提交的版本前缀取该提交可达的最近上游标签。
+- 同一提交先作为普通提交构建、后来成为正式版时，会再发布一个正式版。
+- 每天只处理最新正式版和 `main` 最新提交，不补建期间所有提交。
+- 附件命名：`bili-sync-rs-<标签>-Linux-armv7-gnueabihf.tar.gz`。
 
-+ [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect) B 站的第三方接口文档
-+ [bilibili-api](https://github.com/Nemo2011/bilibili-api) 使用 Python 调用接口的参考实现
-+ [danmu2ass](https://github.com/gwy15/danmu2ass) 本项目弹幕下载功能的缝合来源
+## 维护
+
+修改构建行为时按阶段改对应脚本：
+
+- 调整检测范围、命名规则：`scripts/check-upstream.sh`
+- 调整编译目标、打包方式：`scripts/build-armv7.sh` / `Cross.toml`
+- 调整发布说明、Latest 策略：`scripts/publish-release.sh`
+
+提交前运行自检（只验证标签与去重规则，不联网）：
+
+```bash
+bash scripts/check-upstream.sh --self-test
+```
+
+本地查看当前判定结果（需要已登录的 `gh`）：
+
+```bash
+bash scripts/check-upstream.sh
+```
+
+## 环境要求
+
+CI 使用 Ubuntu 24.04，依赖 `git`、`gh`、`jq`、`bun`、`rustup`、`cross` 与 Docker。本地完整编译建议在 Linux 或 WSL 中执行；Windows 原生环境仅能运行 `--self-test`。

@@ -1,0 +1,105 @@
+name: Upstream Build
+
+# 每天检查一次上游：正式发版和普通提交分别发布 ARMv7 构建
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-build
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: amtoaer/bili-sync
+
+jobs:
+  check:
+    name: 检测上游更新
+    runs-on: ubuntu-24.04
+    outputs:
+      candidates: ${{ steps.check.outputs.candidates }}
+      has_work: ${{ steps.check.outputs.has_work }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: 检查版本
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: bash scripts/check-upstream.sh
+
+  build:
+    name: 编译 ${{ matrix.tag }}
+    needs: check
+    if: needs.check.outputs.has_work == 'true'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJSON(needs.check.outputs.candidates) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 编译并打包
+        env:
+          UPSTREAM_SHA: ${{ matrix.sha }}
+          TAG: ${{ matrix.tag }}
+        run: bash scripts/build-armv7.sh
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.tag }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: 发布 ${{ matrix.tag }}
+    needs: [check, build]
+    if: needs.check.outputs.has_work == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJSON(needs.check.outputs.candidates) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: 下载产物
+        uses: actions/download-artifact@v5
+        with:
+          name: ${{ matrix.tag }}
+          path: dist
+
+      - name: 推送标签并发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TAG: ${{ matrix.tag }}
+          SHA: ${{ matrix.sha }}
+          KIND: ${{ matrix.kind }}
+        run: |
+          set -euo pipefail
+          ASSET_PATH="$(ls dist/*.tar.gz)" bash scripts/publish-release.sh

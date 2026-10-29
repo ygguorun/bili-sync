@@ -1,7 +1,2 @@
-**/target
-auth_data
-*.sqlite*
-debug*
-node_modules
-docs/.vitepress/cache
-docs/.vitepress/dist
+.work/
+dist/
