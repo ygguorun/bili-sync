@@ -40,9 +40,7 @@ elif [[ "$remote_sha" != "$SHA" ]]; then
 fi
 
 BODY="$(printf '%s\n' \
-  "上游提交：$SERVER_URL/$UPSTREAM_REPO/commit/$SHA" \
-  "构建配置：$SERVER_URL/$GITHUB_REPOSITORY/commit/${GITHUB_SHA:-unknown}" \
-  "构建日志：$SERVER_URL/$GITHUB_REPOSITORY/actions/runs/${GITHUB_RUN_ID:-}")"
+  "上游提交：$SERVER_URL/$UPSTREAM_REPO/commit/$SHA")"
 
 # gh api 在 404 时仍会把错误 JSON 写到 stdout，必须按退出码判断
 release_id=""
